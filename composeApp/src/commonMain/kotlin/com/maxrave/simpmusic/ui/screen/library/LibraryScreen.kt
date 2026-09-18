@@ -29,6 +29,8 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.FilledTonalButton
+import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.OutlinedTextField
@@ -75,12 +77,14 @@ import com.maxrave.simpmusic.ui.component.LibraryItemState
 import com.maxrave.simpmusic.ui.component.LibraryItemType
 import com.maxrave.simpmusic.ui.component.LibraryTilingBox
 import com.maxrave.simpmusic.ui.component.ListenTogetherIconButton
+import com.maxrave.simpmusic.ui.component.SpotifyImportHost
 import com.maxrave.simpmusic.ui.component.RippleIconButton
 import com.maxrave.simpmusic.ui.component.selection.SelectedSongsBottomSheet
 import com.maxrave.simpmusic.ui.component.selection.SongSelectionTopAppBar
 import com.maxrave.simpmusic.ui.component.selection.rememberSongSelectionState
 import com.maxrave.simpmusic.ui.icon.Groups
 import com.maxrave.simpmusic.ui.icon.PeopleAlt
+import com.maxrave.simpmusic.ui.icon.PlaylistAdd
 import com.maxrave.simpmusic.ui.icon.SimpIcons
 import com.maxrave.simpmusic.ui.navigation.destination.home.ListenTogetherDestination
 import com.maxrave.simpmusic.ui.theme.typo
@@ -98,6 +102,7 @@ import org.jetbrains.compose.resources.painterResource
 import org.jetbrains.compose.resources.stringResource
 import org.koin.compose.viewmodel.koinViewModel
 import simpmusic.composeapp.generated.resources.Res
+import simpmusic.composeapp.generated.resources.jenny_library_import
 import simpmusic.composeapp.generated.resources.chart
 import simpmusic.composeapp.generated.resources.create
 import simpmusic.composeapp.generated.resources.downloaded_playlists
@@ -146,6 +151,8 @@ fun LibraryScreen(
 
     val selectionState = rememberSongSelectionState()
     val selectionViewModel: SongSelectionViewModel = koinViewModel()
+    var showSpotifyImport by rememberSaveable { mutableStateOf(false) }
+    SpotifyImportHost(visible = showSpotifyImport, onDismiss = { showSpotifyImport = false })
     var showSelectionSheet by rememberSaveable { mutableStateOf(false) }
     var showSelectionAddToPlaylist by rememberSaveable { mutableStateOf(false) }
     val accountThumbnail by viewModel.accountThumbnail.collectAsStateWithLifecycle()
@@ -496,6 +503,18 @@ fun LibraryScreen(
             // The Library bar had no actions slot at all — added for the Listen Together entry,
             // which the design canvas puts on Home AND Library.
             actions = {
+                // Labelled rather than a bare icon: a playlist-add glyph alone reads as "new
+                // playlist", which is a different thing, and this is where someone looking for
+                // their Spotify playlists will actually be.
+                FilledTonalButton(
+                    onClick = { showSpotifyImport = true },
+                    contentPadding = PaddingValues(horizontal = 14.dp),
+                    modifier = Modifier.height(36.dp),
+                ) {
+                    Icon(SimpIcons.PlaylistAdd, contentDescription = null, modifier = Modifier.size(18.dp))
+                    Spacer(Modifier.width(6.dp))
+                    Text(stringResource(Res.string.jenny_library_import), style = typo().labelMedium)
+                }
                 ListenTogetherIconButton { navController.navigate(ListenTogetherDestination) }
             },
         )

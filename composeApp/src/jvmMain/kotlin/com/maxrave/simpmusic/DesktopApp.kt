@@ -1,5 +1,6 @@
 package com.maxrave.simpmusic
 
+import com.maxrave.simpmusic.expect.ui.prewarmDesktopBrowserIfMissing
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -122,6 +123,9 @@ fun runDesktopApp(args: Array<String> = emptyArray()) {
     if (!System.getProperty("os.name", "").contains("Windows", ignoreCase = true)) {
         System.setProperty("skiko.vsync.enabled", "false")
     }
+
+    // First launch only: fetch the login browser in the background so signing in is instant.
+    prewarmDesktopBrowserIfMissing()
 
     // Handle deep link URIs
     // macOS: receives URI via Desktop open URI handler (app already running or launched via scheme)

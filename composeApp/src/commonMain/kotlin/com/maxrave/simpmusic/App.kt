@@ -57,6 +57,7 @@ import androidx.navigation.NavDestination.Companion.hasRoute
 import androidx.navigation.NavDestination.Companion.hierarchy
 import androidx.navigation.compose.currentBackStackEntryAsState
 import androidx.navigation.compose.rememberNavController
+import com.maxrave.simpmusic.ui.component.JennyWelcome
 import androidx.window.core.layout.WindowSizeClass.Companion.WIDTH_DP_MEDIUM_LOWER_BOUND
 import coil3.toUri
 import com.maxrave.domain.data.player.GenericMediaItem
@@ -856,6 +857,13 @@ fun App(
                         },
                     )
                 }
+
+                // First-run welcome. Rendered at the root so it can navigate to each login screen
+                // and reappear when the user comes back from one.
+                JennyWelcome(
+                    navController = navController,
+                    currentRoute = navBackStackEntry?.destination?.route,
+                )
 
                 if (showNotificationPermissionDialog || showDesktopNotificationPermissionDialog) {
                     var doNotShowAgain by remember { mutableStateOf(false) }

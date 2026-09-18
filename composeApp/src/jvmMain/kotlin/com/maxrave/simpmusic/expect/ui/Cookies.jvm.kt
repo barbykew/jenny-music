@@ -148,6 +148,34 @@ private object CefRuntime {
     }
 
     suspend fun client(): KCEFClient? = withContext(Dispatchers.IO) { initIfNeeded() }
+
+    /** Blocking init for a background thread; the result is cached exactly as [client] caches it. */
+    fun warmUp() {
+        initIfNeeded()
+    }
+}
+
+/**
+ * Fetches the ~600 MB Chromium bundle in the background on the first launch, so the first tap on a
+ * login screen opens a browser instead of a long download bar.
+ *
+ * Runs only while the bundle is missing. Once it is on disk this returns immediately, and CEF is
+ * then started on demand by the login screen as before — so an installed app does not keep
+ * Chromium's helper processes alive for a user who never opens a login screen.
+ *
+ * If a login screen is opened while this is still downloading, [CefRuntime]'s init is synchronized,
+ * so the screen simply waits on the same download and its progress poll shows the same percentage;
+ * nothing is fetched twice.
+ */
+fun prewarmDesktopBrowserIfMissing() {
+    if (cefHelperExecutable().exists()) return
+    Thread({
+        runCatching { CefRuntime.warmUp() }
+            .onFailure { Logger.e(TAG, "Background browser download failed: ${it.message}") }
+    }, "cef-prewarm").apply {
+        isDaemon = true
+        start()
+    }
 }
 
 actual fun createWebViewCookieManager(): WebViewCookieManager =

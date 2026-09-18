@@ -106,7 +106,6 @@ import com.maxrave.domain.data.model.lyrics.RomanizationLanguage
 import com.maxrave.domain.manager.DataStoreManager
 import com.maxrave.domain.manager.DataStoreManager.Values.TRUE
 import com.maxrave.domain.repository.ImportProgress
-import com.maxrave.domain.repository.SpotifyImportProgress
 import com.maxrave.domain.utils.LocalResource
 import com.maxrave.logger.Logger
 import com.maxrave.simpmusic.Platform
@@ -126,6 +125,7 @@ import com.maxrave.simpmusic.ui.component.EndOfPage
 import com.maxrave.simpmusic.ui.component.LoadingDialog
 import com.maxrave.simpmusic.ui.component.RippleIconButton
 import com.maxrave.simpmusic.ui.component.SettingItem
+import com.maxrave.simpmusic.ui.component.SpotifyImportHost
 import com.maxrave.simpmusic.ui.component.rememberNowPlayingGlowTint
 import com.maxrave.simpmusic.ui.icon.ArrowBackIosNew
 import com.maxrave.simpmusic.ui.icon.Close
@@ -143,7 +143,6 @@ import com.maxrave.simpmusic.ui.theme.parseThemeColorHex
 import com.maxrave.simpmusic.ui.theme.typo
 import com.maxrave.simpmusic.utils.VersionManager
 import com.maxrave.simpmusic.viewModel.ImportViewModel
-import com.maxrave.simpmusic.viewModel.SpotifyImportViewModel
 import com.maxrave.simpmusic.viewModel.SettingAlertState
 import com.maxrave.simpmusic.viewModel.SettingBasicAlertState
 import com.maxrave.simpmusic.viewModel.SettingsViewModel
@@ -263,12 +262,12 @@ import simpmusic.composeapp.generated.resources.import_data
 import simpmusic.composeapp.generated.resources.import_data_intro
 import simpmusic.composeapp.generated.resources.spotify_import
 import simpmusic.composeapp.generated.resources.spotify_import_description
-import simpmusic.composeapp.generated.resources.spotify_import_hint
-import simpmusic.composeapp.generated.resources.spotify_import_intro
-import simpmusic.composeapp.generated.resources.spotify_import_matching
-import simpmusic.composeapp.generated.resources.spotify_import_reading
-import simpmusic.composeapp.generated.resources.spotify_import_unmatched
-import simpmusic.composeapp.generated.resources.spotify_import_writing
+import simpmusic.composeapp.generated.resources.jenny_quick_colour
+import simpmusic.composeapp.generated.resources.jenny_quick_colour_sub
+import simpmusic.composeapp.generated.resources.jenny_quick_presence
+import simpmusic.composeapp.generated.resources.jenny_quick_presence_connect
+import simpmusic.composeapp.generated.resources.jenny_quick_presence_sub
+import simpmusic.composeapp.generated.resources.jenny_quick_title
 import simpmusic.composeapp.generated.resources.import_failed
 import simpmusic.composeapp.generated.resources.import_playlists_from_other_apps
 import simpmusic.composeapp.generated.resources.import_progress_songs
@@ -498,8 +497,6 @@ fun SettingScreen(
 
     // Import a Spotify playlist by URL. No file picker: the link goes straight to the repository,
     // which pages the playlist and matches each track on YouTube Music.
-    val spotifyImportViewModel: SpotifyImportViewModel = koinViewModel()
-    val spotifyImportState by spotifyImportViewModel.importState.collectAsStateWithLifecycle()
     var showSpotifyImportDialog by rememberSaveable { mutableStateOf(false) }
     val importLauncher =
         rememberFilePickerLauncher(
@@ -679,6 +676,34 @@ fun SettingScreen(
                 // translation tracks item 0's offset exactly and parks once it scrolls past, and a
                 // 64dp item 0 would have switched branches while the glow was still half-visible.
                 Spacer(Modifier.height(64.dp))
+                Spacer(Modifier.height(16.dp))
+                // Jenny quick settings: the three things she will actually reach for, gathered at
+                // the top. Each row is a shortcut into the full control further down, not a second
+                // copy of it, so the two can never disagree.
+                Text(text = stringResource(Res.string.jenny_quick_title), style = typo().labelMedium, color = MaterialTheme.colorScheme.onBackground)
+                SettingItem(
+                    title = stringResource(Res.string.jenny_quick_colour),
+                    subtitle = stringResource(Res.string.jenny_quick_colour_sub),
+                    onClick = { showColorPickerDialog = true },
+                )
+                if (discordLoggedIn) {
+                    SettingItem(
+                        title = stringResource(Res.string.jenny_quick_presence),
+                        subtitle = stringResource(Res.string.jenny_quick_presence_sub),
+                        switch = (richPresenceEnabled to { viewModel.setDiscordRichPresenceEnabled(it) }),
+                    )
+                } else {
+                    SettingItem(
+                        title = stringResource(Res.string.jenny_quick_presence),
+                        subtitle = stringResource(Res.string.jenny_quick_presence_connect),
+                        onClick = { navController.navigate(DiscordLoginDestination) },
+                    )
+                }
+                SettingItem(
+                    title = stringResource(Res.string.spotify_import),
+                    subtitle = stringResource(Res.string.spotify_import_description),
+                    onClick = { showSpotifyImportDialog = true },
+                )
                 Spacer(Modifier.height(16.dp))
                 Text(text = stringResource(Res.string.user_interface), style = typo().labelMedium, color = MaterialTheme.colorScheme.onBackground)
                 val themeModeLabels =
@@ -2781,21 +2806,10 @@ fun SettingScreen(
             onDismiss = importViewModel::dismiss,
         )
     }
-    if (showSpotifyImportDialog) {
-        SpotifyImportUrlDialog(
-            onDismiss = { showSpotifyImportDialog = false },
-            onConfirm = { url ->
-                showSpotifyImportDialog = false
-                spotifyImportViewModel.import(url)
-            },
-        )
-    }
-    spotifyImportState?.let { progress ->
-        SpotifyImportProgressDialog(
-            progress = progress,
-            onDismiss = spotifyImportViewModel::dismiss,
-        )
-    }
+    SpotifyImportHost(
+        visible = showSpotifyImportDialog,
+        onDismiss = { showSpotifyImportDialog = false },
+    )
     val showLoadingDialog by viewModel.showLoadingDialog.collectAsStateWithLifecycle()
     if (showLoadingDialog.first) {
         LoadingDialog(
@@ -3508,163 +3522,6 @@ private fun ImportProgressDialog(
                 TextButton(onClick = onDismiss) {
                     Text(text = stringResource(Res.string.ok))
                 }
-            }
-        },
-    )
-}
-/**
- * Asks for the Spotify playlist link.
- *
- * Confirm stays disabled until the text parses as a playlist id, so a half-pasted link cannot start
- * an import that would only fail a second later. The check mirrors
- * `SpotifyImportRepositoryImpl.parsePlaylistId` rather than calling it — that lives in the data
- * module, which the UI does not depend on.
- */
-@Composable
-private fun SpotifyImportUrlDialog(
-    onDismiss: () -> Unit,
-    onConfirm: (String) -> Unit,
-) {
-    var url by rememberSaveable { mutableStateOf("") }
-    val looksValid =
-        remember(url) {
-            val trimmed = url.trim()
-            val candidate =
-                when {
-                    trimmed.contains("playlist/") ->
-                        trimmed.substringAfter("playlist/").substringBefore('?').substringBefore('/')
-                    trimmed.contains("playlist:") ->
-                        trimmed.substringAfter("playlist:").substringBefore('?')
-                    else -> trimmed
-                }
-            candidate.length == 22 && candidate.all { it.isLetterOrDigit() }
-        }
-    AlertDialog(
-        onDismissRequest = onDismiss,
-        title = { Text(text = stringResource(Res.string.spotify_import), style = typo().titleSmall) },
-        text = {
-            Column {
-                Text(
-                    text = stringResource(Res.string.spotify_import_intro),
-                    style = typo().bodySmall,
-                )
-                Spacer(Modifier.height(12.dp))
-                TextField(
-                    value = url,
-                    onValueChange = { url = it },
-                    label = { Text(stringResource(Res.string.spotify_import_hint)) },
-                    singleLine = true,
-                    modifier = Modifier.fillMaxWidth(),
-                )
-            }
-        },
-        confirmButton = {
-            TextButton(
-                enabled = looksValid,
-                onClick = { onConfirm(url.trim()) },
-            ) { Text(text = stringResource(Res.string.import_data)) }
-        },
-        dismissButton = {
-            TextButton(onClick = onDismiss) { Text(text = stringResource(Res.string.cancel)) }
-        },
-    )
-}
-
-/**
- * Progress and outcome of a Spotify import.
- *
- * Unlike [ImportProgressDialog] this one is dismissible at every stage. Matching is the long phase
- * and it writes nothing — the repository only hands the resolved set to the importer once every
- * track has been looked up — so backing out of a 300-track playlist that is taking too long is
- * safe and leaves no partial playlist behind.
- */
-@Composable
-private fun SpotifyImportProgressDialog(
-    progress: SpotifyImportProgress,
-    onDismiss: () -> Unit,
-) {
-    val finished = progress is SpotifyImportProgress.Success || progress is SpotifyImportProgress.Error
-    AlertDialog(
-        onDismissRequest = onDismiss,
-        title = {
-            Text(
-                text =
-                    stringResource(
-                        if (progress is SpotifyImportProgress.Error) Res.string.import_failed else Res.string.spotify_import,
-                    ),
-                style = typo().titleSmall,
-            )
-        },
-        text = {
-            Column {
-                when (progress) {
-                    is SpotifyImportProgress.Preparing -> {
-                        Text(
-                            text = stringResource(Res.string.spotify_import_reading),
-                            style = typo().bodyMedium,
-                        )
-                        Spacer(Modifier.height(12.dp))
-                        LinearProgressIndicator(modifier = Modifier.fillMaxWidth())
-                    }
-
-                    is SpotifyImportProgress.Matching -> {
-                        Text(
-                            text = stringResource(Res.string.spotify_import_matching, progress.matched, progress.total),
-                            style = typo().bodyMedium,
-                        )
-                        Spacer(Modifier.height(12.dp))
-                        LinearProgressIndicator(
-                            progress = {
-                                if (progress.total > 0) progress.matched.toFloat() / progress.total else 0f
-                            },
-                            modifier = Modifier.fillMaxWidth(),
-                        )
-                    }
-
-                    is SpotifyImportProgress.Writing -> {
-                        Text(
-                            text = stringResource(Res.string.spotify_import_writing, progress.processed, progress.total),
-                            style = typo().bodyMedium,
-                        )
-                        Spacer(Modifier.height(12.dp))
-                        LinearProgressIndicator(
-                            progress = {
-                                if (progress.total > 0) progress.processed.toFloat() / progress.total else 0f
-                            },
-                            modifier = Modifier.fillMaxWidth(),
-                        )
-                    }
-
-                    is SpotifyImportProgress.Success -> {
-                        Text(
-                            text =
-                                stringResource(
-                                    Res.string.import_result,
-                                    progress.result.playlistsCreated,
-                                    progress.result.songsImported,
-                                ),
-                            style = typo().bodyMedium,
-                        )
-                        // Reported rather than hidden: YouTube Music genuinely does not carry
-                        // everything Spotify does, so a short playlist is expected, not a bug.
-                        if (progress.unmatched > 0) {
-                            Spacer(Modifier.height(8.dp))
-                            Text(
-                                text = stringResource(Res.string.spotify_import_unmatched, progress.unmatched),
-                                style = typo().bodySmall,
-                            )
-                        }
-                    }
-
-                    is SpotifyImportProgress.Error -> {
-                        Text(text = progress.message, style = typo().bodyMedium)
-                    }
-                }
-            }
-        },
-        confirmButton = {
-            TextButton(onClick = onDismiss) {
-                Text(text = stringResource(if (finished) Res.string.ok else Res.string.cancel))
             }
         },
     )
