@@ -234,7 +234,18 @@ private fun CefHost(
             },
         )
         browser = withContext(Dispatchers.IO) {
-            runCatching { client.createBrowser(url, CefRendering.DEFAULT, false) }
+            runCatching {
+                // OFFSCREEN, not DEFAULT. DEFAULT gives a HEAVYWEIGHT AWT canvas, and this app's
+                // window is `transparent = true, undecorated = true` (DesktopApp.kt) — Java cannot
+                // composite a heavyweight child inside a translucent window, so the canvas renders
+                // as a hole showing the desktop behind it. It looks like the page never loads, or
+                // like the app is mirroring whatever is behind the window.
+                //
+                // Offscreen rendering paints into a bitmap surfaced through a LIGHTWEIGHT
+                // component, which composites correctly. It is also what every Compose
+                // Multiplatform WebView wrapper uses on desktop, for exactly this reason.
+                client.createBrowser(url, CefRendering.OFFSCREEN, false)
+            }
                 .onFailure {
                     error = it.message
                     Logger.e(TAG, "createBrowser failed: ${it.message}")
