@@ -38,6 +38,7 @@ import org.cef.browser.CefRendering
 import org.cef.callback.CefJSDialogCallback
 import org.cef.handler.CefJSDialogHandler
 import org.cef.handler.CefJSDialogHandlerAdapter
+import org.cef.handler.CefDisplayHandlerAdapter
 import org.cef.handler.CefLoadHandlerAdapter
 import org.cef.misc.BoolRef
 import org.cef.network.CefCookieManager
@@ -46,6 +47,8 @@ import java.io.File
 import javax.swing.JFrame
 import javax.swing.SwingUtilities
 import javax.swing.WindowConstants
+import java.util.Timer
+import java.util.TimerTask
 import java.util.concurrent.TimeUnit
 
 private const val TAG = "DesktopWebView"
@@ -203,7 +206,7 @@ private fun CefHost(
     aboveContent: @Composable (BoxScope.() -> Unit),
     windowTitle: String,
     configure: (KCEFClient) -> Unit = {},
-    onLoadEnd: (KCEFBrowser, String) -> Unit,
+    onLoadEnd: (CefBrowser, String) -> Unit,
 ) {
     var status by remember { mutableStateOf<String?>(null) }
     var error by remember { mutableStateOf<String?>(null) }
@@ -235,6 +238,24 @@ private fun CefHost(
             return@LaunchedEffect
         }
         currentConfigure(client)
+        // Discord signs in with XHR and then routes CLIENT-SIDE to /channels/@me — no new document
+        // is loaded, so onLoadEnd never fires again and a check that lives only there never runs.
+        // onAddressChange does fire for SPA navigation, which is what actually catches the login.
+        // Both are wired up: a normal page load reports through onLoadEnd, a route change through
+        // onAddressChange, and the callback itself is idempotent.
+        client.addDisplayHandler(
+            object : CefDisplayHandlerAdapter() {
+                override fun onAddressChange(
+                    b: CefBrowser?,
+                    f: CefFrame?,
+                    url: String?,
+                ) {
+                    if (f?.isMain != true) return
+                    val current = url ?: return
+                    b?.let { currentOnLoadEnd(it, current) }
+                }
+            },
+        )
         client.addLoadHandler(
             object : CefLoadHandlerAdapter() {
                 override fun onLoadingStateChange(
@@ -255,7 +276,7 @@ private fun CefHost(
                     // on each would run the login check once per frame.
                     if (f?.isMain != true) return
                     val current = b?.url ?: return
-                    browser?.let { currentOnLoadEnd(it, current) }
+                    currentOnLoadEnd(b, current)
                 }
             },
         )
@@ -366,9 +387,22 @@ actual fun DiscordWebView(
             )
         },
         onLoadEnd = { browser, url ->
-            // Reaching /app or /channels means the session exists.
+            // Reaching /app or /channels means the session exists. The script is fired on a short
+            // repeat because the route change is announced before Discord has finished writing the
+            // token into localStorage — a single shot right on navigation reads nothing and the
+            // window then sits there logged in but never closing. The snippet is a no-op once the
+            // token has already been handed over, so repeating it is harmless.
             if (url.contains("/app") || url.contains("/channels")) {
-                browser.executeJavaScript(DISCORD_TOKEN_SNIPPET, url, 0)
+                repeat(TOKEN_READ_ATTEMPTS) { attempt ->
+                    Timer(true).schedule(
+                        object : TimerTask() {
+                            override fun run() {
+                                runCatching { browser.executeJavaScript(DISCORD_TOKEN_SNIPPET, url, 0) }
+                            }
+                        },
+                        attempt * TOKEN_READ_INTERVAL_MS,
+                    )
+                }
             }
         },
     )
@@ -380,6 +414,9 @@ actual fun DiscordWebView(
  * Written as plain JS rather than the `javascript:`-URL form the Android actual uses, because
  * [KCEFBrowser.executeJavaScript] takes a script body, not a navigation URL.
  */
+private const val TOKEN_READ_ATTEMPTS = 8
+private const val TOKEN_READ_INTERVAL_MS = 700L
+
 private const val DISCORD_TOKEN_SNIPPET = """
     (function () {
         var i = document.createElement('iframe');
