@@ -63,6 +63,21 @@ private val cefInstallDir: File
     get() = File(System.getProperty("user.home"), ".jennymusic/kcef-bundle")
 
 /**
+ * CEF's helper binary, whose name differs per OS: a bare `jcef_helper` on Linux, `jcef_helper.exe`
+ * on Windows, and a nested .app bundle on macOS. Only the Windows build ships today, but this file
+ * compiles for all three, so the wrong name here would move the crash rather than remove it.
+ */
+private fun cefHelperExecutable(): File {
+    val os = System.getProperty("os.name").orEmpty().lowercase()
+    return when {
+        os.contains("win") -> File(cefInstallDir, "jcef_helper.exe")
+        os.contains("mac") || os.contains("darwin") ->
+            File(cefInstallDir, "jcef Helper.app/Contents/MacOS/jcef Helper")
+        else -> File(cefInstallDir, "jcef_helper")
+    }
+}
+
+/**
  * Initialisation is process-wide and must happen exactly once, so it is cached here rather than
  * tied to a composable's lifetime — reopening the login screen must not restart a 150 MB download,
  * and CEF itself throws if initialised twice.
@@ -97,6 +112,16 @@ private object CefRuntime {
                         // Keep the login session on disk so a token survives an app restart, the
                         // same way the Android WebView's cookie jar does.
                         cachePath = File(cefInstallDir, "cache").absolutePath
+
+                        // MUST be set, or CEF re-launches THIS executable for each of its helper
+                        // processes (gpu, utility, renderer) and passes Chromium switches to it.
+                        // Under a Java launcher the JVM then receives "--type=gpu-process", prints
+                        // "Unrecognized option" and aborts — repeatedly, until the whole app dies.
+                        // That is a silent native death: no Kotlin exception, no hs_err file, the
+                        // process simply disappears a second after the login screen opens.
+                        browserSubProcessPath = cefHelperExecutable().absolutePath
+                        resourcesDirPath = cefInstallDir.absolutePath
+                        localesDirPath = File(cefInstallDir, "locales").absolutePath
                     }
                 },
                 onError = { t ->
