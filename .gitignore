@@ -46,3 +46,6 @@ sentry.properties
 /desktopApp/generated.conveyor.conf
 # Conveyor output directory
 /output/
+
+# Jenny Music release signing key — never commit
+/jenny-music.jks

@@ -105,7 +105,7 @@ object WindowsProtocolRegistrar {
         }
 
         if (appDir != null) {
-            val exeFile = java.io.File(appDir, "SimpMusic.exe")
+            val exeFile = java.io.File(appDir, "Jenny Music.exe")
             if (exeFile.exists()) {
                 return exeFile.absolutePath
             }

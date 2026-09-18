@@ -81,8 +81,31 @@ android {
         }
     }
 
+    // Release signing. Credentials live in local.properties (gitignored) rather than in this
+    // file, so the key and its passwords never reach the public repository. A missing keystore
+    // leaves signingConfig null, which still builds — it just produces an unsigned APK, the same
+    // as upstream — instead of failing the whole configuration phase for anyone who clones this.
+    val jennyKeystore = rootProject.file("jenny-music.jks")
+    val jennyProps =
+        Properties().apply {
+            val f = rootProject.file("local.properties")
+            if (f.exists()) f.inputStream().use { load(it) }
+        }
+
+    signingConfigs {
+        if (jennyKeystore.exists() && jennyProps.getProperty("JENNY_KEY_ALIAS") != null) {
+            create("jenny") {
+                storeFile = jennyKeystore
+                storePassword = jennyProps.getProperty("JENNY_KEYSTORE_PASSWORD")
+                keyAlias = jennyProps.getProperty("JENNY_KEY_ALIAS")
+                keyPassword = jennyProps.getProperty("JENNY_KEY_PASSWORD")
+            }
+        }
+    }
+
     buildTypes {
         release {
+            signingConfig = signingConfigs.findByName("jenny")
             isMinifyEnabled = true
             isShrinkResources = true
             proguardFiles(
@@ -204,7 +227,13 @@ sentry {
             }
         authToken.set(token ?: "")
         includeProguardMapping.set(true)
-        autoUploadProguardMapping.set(true)
+        // Upload only when a token is actually present. This fork has no Sentry org of its own,
+        // and `org` above points at SimpMusic's — so uploading here would be pushing mappings to
+        // someone else's account. With no token the task does not skip, it FAILS, and it runs
+        // after packaging: the release APKs are already on disk by then, so the build reports
+        // failure while having produced everything. Keeping the mapping local costs nothing, it
+        // is still written to build/outputs/mapping/ for de-obfuscating a stack trace by hand.
+        autoUploadProguardMapping.set(!token.isNullOrBlank())
     } else {
         includeProguardMapping.set(false)
         autoUploadProguardMapping.set(false)

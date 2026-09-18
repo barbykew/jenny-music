@@ -213,7 +213,7 @@ compose.desktop {
                     libs.versions.version.name
                         .get()
                         .removeSuffix("-hf")
-                iconFile.set(rootDir.resolve("composeApp/icon/circle_app_icon.ico"))
+                iconFile.set(rootDir.resolve("composeApp/icon/jenny_app_icon.ico"))
             }
             linux {
                 includeAllModules = true
