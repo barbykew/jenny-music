@@ -7,8 +7,12 @@ import androidx.compose.ui.graphics.Color
 /**
  * Brand seed color. The whole Material 3 ColorScheme is generated from this
  * color at runtime — see [AppTheme].
+ *
+ * Pastel rose. The scheme is generated with [com.materialkolor.PaletteStyle.TonalSpot], which
+ * pulls its own chroma from the seed's hue rather than copying the seed verbatim, so a pastel
+ * here shifts the whole palette soft without washing out the accent roles.
  */
-val seed = Color(0xFF8ECAE6)
+val seed = Color(0xFFF2B8D4)
 
 // ===== Semantic colors (not derivable from the color scheme) =====
 

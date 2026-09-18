@@ -129,7 +129,7 @@ tasks.named<hydraulic.conveyor.gradle.WriteConveyorConfigTask>("writeConveyorCon
         destination.get().asFile.appendText(
             """
             |app.fsname = simpmusic
-            |app.display-name = SimpMusic
+            |app.display-name = Jenny Music
             |app.rdns-name = com.maxrave.simpmusic
             |
             |// Override the Gradle-detected classpath with the ProGuard'd
@@ -167,7 +167,7 @@ compose.desktop {
             }
             targetFormats(*listTarget.toTypedArray())
             modules("jdk.unsupported")
-            packageName = "SimpMusic"
+            packageName = "Jenny Music"
             macOS {
                 val formatedDate =
                     Instant.now().let {
