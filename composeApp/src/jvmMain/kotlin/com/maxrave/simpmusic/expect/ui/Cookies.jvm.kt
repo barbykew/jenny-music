@@ -356,6 +356,8 @@ actual fun DiscordWebView(
     onLoginDone: (String) -> Unit,
 ) {
     val currentOnLoginDone by rememberUpdatedState(onLoginDone)
+    // The token read is retried, so the alert can arrive several times; only the first may log in.
+    val delivered = remember { java.util.concurrent.atomic.AtomicBoolean(false) }
     CefHost(
         state = state,
         url = "https://discord.com/login",
@@ -380,7 +382,13 @@ actual fun DiscordWebView(
                         val token = messageText?.takeIf { it.isNotBlank() }
                         callback?.Continue(true, "")
                         suppressMessage?.set(true)
-                        if (token != null) currentOnLoginDone(token)
+                        // onJSDialog runs on a CEF thread. The callback saves the token and
+                        // navigates back, and navigation must happen on the UI thread — calling it
+                        // from here threw "setCurrentState must be called on the main thread" and
+                        // the login was lost even though the token had been read correctly.
+                        if (token != null && delivered.compareAndSet(false, true)) {
+                            SwingUtilities.invokeLater { currentOnLoginDone(token) }
+                        }
                         return true
                     }
                 },
