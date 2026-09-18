@@ -187,6 +187,7 @@ kotlin {
             implementation(libs.sentry.jvm)
             implementation(libs.native.tray)
             implementation(projects.mediaJvmUi)
+            implementation(libs.kcef)
         }
     }
 }
