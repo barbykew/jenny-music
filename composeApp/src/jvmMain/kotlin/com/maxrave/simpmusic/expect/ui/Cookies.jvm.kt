@@ -19,7 +19,6 @@ import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.awt.SwingPanel
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
@@ -42,7 +41,11 @@ import org.cef.handler.CefJSDialogHandlerAdapter
 import org.cef.handler.CefLoadHandlerAdapter
 import org.cef.misc.BoolRef
 import org.cef.network.CefCookieManager
+import java.awt.BorderLayout
 import java.io.File
+import javax.swing.JFrame
+import javax.swing.SwingUtilities
+import javax.swing.WindowConstants
 import java.util.concurrent.TimeUnit
 
 private const val TAG = "DesktopWebView"
@@ -173,24 +176,47 @@ actual fun createWebViewCookieManager(): WebViewCookieManager =
  * The browser is created off the UI thread (CEF blocks while it starts) and is disposed when the
  * composable leaves, otherwise each visit to a login screen leaks a Chromium process.
  */
+/**
+ * Opens the CEF browser in its own top-level window and reports status inside the app.
+ *
+ * The browser deliberately does NOT live inside the Compose window. Three separate failures forced
+ * that, each hidden behind the previous one:
+ *
+ *  1. The app's window is `transparent = true, undecorated = true` (DesktopApp.kt). Java cannot
+ *     composite a HEAVYWEIGHT AWT child inside a translucent window, so CEF's default canvas
+ *     punched a hole through the app and showed the desktop behind it.
+ *  2. Switching to OFFSCREEN rendering avoided that, but JCEF's offscreen path draws through
+ *     OpenGL, which needs JOGL's natives — and then fails outright on a 10-bit/HDR display, where
+ *     JOGL asks for `rgba 8/8/8/0`, Windows offers `rgba 10/10/10/2`, and JOGL rejects the
+ *     mismatch with "Unable to determine GraphicsConfiguration". That depends on the user's
+ *     monitor, so it cannot be relied on.
+ *  3. A plain opaque [JFrame] has neither problem: default rendering, no translucency to fight,
+ *     no OpenGL anywhere. It is also how desktop apps normally present a sign-in.
+ *
+ * The frame is disposed when the composable leaves, so closing the login screen cannot leave an
+ * orphaned Chromium window behind.
+ */
 @Composable
 private fun CefHost(
     state: MutableState<WebViewState>,
     url: String,
     aboveContent: @Composable (BoxScope.() -> Unit),
+    windowTitle: String,
     configure: (KCEFClient) -> Unit = {},
     onLoadEnd: (KCEFBrowser, String) -> Unit,
 ) {
-    var browser by remember { mutableStateOf<KCEFBrowser?>(null) }
+    var status by remember { mutableStateOf<String?>(null) }
     var error by remember { mutableStateOf<String?>(null) }
     var percent by remember { mutableStateOf<Float?>(null) }
+    var frame by remember { mutableStateOf<JFrame?>(null) }
+    var browser by remember { mutableStateOf<KCEFBrowser?>(null) }
     val currentOnLoadEnd by rememberUpdatedState(onLoadEnd)
     val currentConfigure by rememberUpdatedState(configure)
 
     LaunchedEffect(url) {
         // Poll the download percentage WHILE init runs. Sampling it once after CefRuntime.client()
         // returns is useless: that call blocks for the whole download, so by the time it comes back
-        // the percentage is already null and the user has stared at a bar with no number on it for
+        // the percentage is already null and the user has watched a bar with no number on it for
         // several minutes of a ~600 MB fetch, with nothing to distinguish it from a hang.
         val progressPoll = launch {
             while (isActive) {
@@ -222,69 +248,64 @@ private fun CefHost(
 
                 override fun onLoadEnd(
                     b: CefBrowser?,
-                    frame: CefFrame?,
+                    f: CefFrame?,
                     httpStatusCode: Int,
                 ) {
-                    // Only the main frame: a page like Discord's loads many subframes, and acting
-                    // on each one would fire the login check dozens of times per page.
-                    if (frame?.isMain != true) return
+                    // Main frame only: a page like Discord's loads dozens of subframes, and acting
+                    // on each would run the login check once per frame.
+                    if (f?.isMain != true) return
                     val current = b?.url ?: return
                     browser?.let { currentOnLoadEnd(it, current) }
                 }
             },
         )
-        browser = withContext(Dispatchers.IO) {
-            runCatching {
-                // OFFSCREEN, not DEFAULT. DEFAULT gives a HEAVYWEIGHT AWT canvas, and this app's
-                // window is `transparent = true, undecorated = true` (DesktopApp.kt) — Java cannot
-                // composite a heavyweight child inside a translucent window, so the canvas renders
-                // as a hole showing the desktop behind it. It looks like the page never loads, or
-                // like the app is mirroring whatever is behind the window.
-                //
-                // Offscreen rendering paints into a bitmap surfaced through a LIGHTWEIGHT
-                // component, which composites correctly. It is also what every Compose
-                // Multiplatform WebView wrapper uses on desktop, for exactly this reason.
-                client.createBrowser(url, CefRendering.OFFSCREEN, false)
-            }
+
+        val created = withContext(Dispatchers.IO) {
+            runCatching { client.createBrowser(url, CefRendering.DEFAULT, false) }
                 .onFailure {
                     error = it.message
                     Logger.e(TAG, "createBrowser failed: ${it.message}")
                 }.getOrNull()
+        } ?: return@LaunchedEffect
+        browser = created
+
+        withContext(Dispatchers.Main) {
+            frame = JFrame(windowTitle).apply {
+                defaultCloseOperation = WindowConstants.DISPOSE_ON_CLOSE
+                contentPane.add(created.uiComponent, BorderLayout.CENTER)
+                setSize(1000, 760)
+                setLocationRelativeTo(null)
+                isVisible = true
+                toFront()
+                requestFocus()
+            }
+            status = "A sign-in window has opened. Finish logging in there — this screen will close by itself."
         }
     }
 
     DisposableEffect(Unit) {
         onDispose {
             runCatching { browser?.close(true) }
+            frame?.let { f -> SwingUtilities.invokeLater { f.dispose() } }
         }
     }
 
     Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-        val current = browser
-        if (current != null) {
-            SwingPanel(
-                background = Color.Black,
-                factory = { current.uiComponent },
-                modifier = Modifier.fillMaxSize(),
+        Column(
+            modifier = Modifier.padding(32.dp),
+            horizontalAlignment = Alignment.CenterHorizontally,
+        ) {
+            Text(
+                text = error
+                    ?: status
+                    ?: percent?.let { "Downloading browser… ${it.toInt()}% — one-time ~600 MB download" }
+                    ?: "Starting browser…",
+                style = typo().labelMedium,
+                color = Color.White,
+                textAlign = TextAlign.Center,
             )
-        } else {
-            Column(
-                modifier = Modifier.padding(32.dp),
-                horizontalAlignment = Alignment.CenterHorizontally,
-            ) {
-                Text(
-                    text = error
-                        ?: percent?.let { "Downloading browser… ${it.toInt()}% — one-time ~600 MB download" }
-                        ?: "Starting browser…",
-                    style = typo().labelMedium,
-                    color = Color.White,
-                    textAlign = TextAlign.Center,
-                )
-                if (error == null) {
-                    LinearProgressIndicator(
-                        modifier = Modifier.fillMaxWidth().padding(top = 16.dp),
-                    )
-                }
+            if (error == null && status == null) {
+                LinearProgressIndicator(modifier = Modifier.fillMaxWidth().padding(top = 16.dp))
             }
         }
         aboveContent()
@@ -302,6 +323,7 @@ actual fun PlatformWebView(
         state = state,
         url = initUrl,
         aboveContent = aboveContent,
+        windowTitle = "Jenny Music — Sign in",
         onLoadEnd = { _, url -> onPageFinished(url) },
     )
 }
@@ -317,6 +339,7 @@ actual fun DiscordWebView(
         state = state,
         url = "https://discord.com/login",
         aboveContent = aboveContent,
+        windowTitle = "Jenny Music — Sign in to Discord",
         configure = { client ->
             // Same trick the Android actual uses: the injected script reads localStorage.token and
             // hands it out through alert(), which is intercepted here instead of being shown.

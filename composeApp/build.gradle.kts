@@ -188,14 +188,6 @@ kotlin {
             implementation(libs.native.tray)
             implementation(projects.mediaJvmUi)
             implementation(libs.kcef)
-            // JOGL natives for KCEF's OFFSCREEN renderer. JCEF draws an offscreen browser through
-            // OpenGL, so gluegen-rt/jogl-all arrive transitively — but only the Java halves. The
-            // .dll lives in a separate artifact selected by a `natives-<os>-<arch>` classifier,
-            // and without it the login screen dies with
-            // "Couldn't load library 'gluegen_rt'" after listing every directory on PATH.
-            // Windows x64 only, matching the one desktop target this fork ships.
-            implementation("org.jogamp.gluegen:gluegen-rt:2.5.0:natives-windows-amd64")
-            implementation("org.jogamp.jogl:jogl-all:2.5.0:natives-windows-amd64")
         }
     }
 }
